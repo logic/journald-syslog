@@ -14,6 +14,7 @@ import (
 
 	"github.com/coreos/go-systemd/activation"
 	"github.com/coreos/go-systemd/journal"
+	"github.com/jonboulle/clockwork"
 )
 
 // RFC5424: MUST receive 408-octet messages, SHOULD accept 2048-octet messages
@@ -24,28 +25,33 @@ type SyslogMessage struct {
 	Version        int
 	Facility       int
 	Severity       int
-	Timestamp      string
+	Timestamp      time.Time
 	Hostname       string
 	Tag            string
 	StructuredData string
 	Message        string
 	Source         string
+
+	clock clockwork.Clock
+}
+
+func NewSyslogMessage() *SyslogMessage {
+	// We're technically a relay, so per RFC3164, we're expected to fill
+	// in a few defaults before passing the message along.
+	clock := clockwork.NewRealClock()
+	return &SyslogMessage{
+		Version:   0,
+		Facility:  0,
+		Severity:  5,
+		Timestamp: clock.Now(),
+		clock:     clock,
+	}
 }
 
 // ParseSyslog takes a syslog packet and source address as strings, and
 // parses them into a SyslogMessage.
-func ParseSyslog(buf string, source string) *SyslogMessage {
-	// We're technically a relay, so per RFC3164, we're expected to fill
-	// in a few defaults before passing the message along.
-	msg := SyslogMessage{
-		Version:   0,
-		Facility:  0,
-		Severity:  5,
-		Timestamp: time.Now().UTC().String(),
-		Hostname:  source,
-		Source:    source,
-	}
-
+func (msg *SyslogMessage) Parse(buf string, source string) {
+	msg.Source = source
 	rest := buf[:]
 
 	// PRI
@@ -69,7 +75,7 @@ func ParseSyslog(buf string, source string) *SyslogMessage {
 							ts, err = time.Parse(time.RFC3339, rest[:tsEnd])
 						}
 						if err == nil {
-							msg.Timestamp = ts.String()
+							msg.Timestamp = ts
 							rest = rest[tsEnd+1:]
 
 							// HOSTNAME, APP-NAME/PROCID/MSGID (TAG)
@@ -93,7 +99,7 @@ func ParseSyslog(buf string, source string) *SyslogMessage {
 				} else {
 					// TIMESTAMP
 					if ts, err := time.Parse(time.Stamp, rest[:15]); err == nil {
-						msg.Timestamp = ts.String()
+						msg.Timestamp = ts
 						rest = rest[16:]
 
 						// HOSTNAME, TAG
@@ -108,26 +114,23 @@ func ParseSyslog(buf string, source string) *SyslogMessage {
 		}
 	}
 	msg.Message = rest
-	return &msg
 }
 
 // IngestMessage takes a syslog packet and source address as strings, and
 // logs a parsed version of them to journald.
 func IngestMessage(buf string, source string) {
-	msg := ParseSyslog(buf, source)
+	msg := NewSyslogMessage()
+	msg.Parse(buf, source)
 
 	vars := map[string]string{
-		"SYSLOG_VERSION":  strconv.Itoa(msg.Version),
-		"SYSLOG_FACILITY": strconv.Itoa(msg.Facility),
-		"SYSLOG_SEVERITY": strconv.Itoa(msg.Severity),
+		"SYSLOG_VERSION":   strconv.Itoa(msg.Version),
+		"SYSLOG_FACILITY":  strconv.Itoa(msg.Facility),
+		"SYSLOG_SEVERITY":  strconv.Itoa(msg.Severity),
+		"SYSLOG_TIMESTAMP": msg.Timestamp.String(),
 
 		// Without the hostname, the tag isn't a complete identifier.
 		"SYSLOG_IDENTIFIER": strings.Join([]string{
 			msg.Hostname, msg.Tag}, " "),
-	}
-
-	if len(msg.Timestamp) > 0 {
-		vars["SYSLOG_TIMESTAMP"] = msg.Timestamp
 	}
 
 	if len(msg.Hostname) > 0 {
