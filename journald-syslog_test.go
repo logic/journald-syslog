@@ -12,7 +12,7 @@ func TestParseSyslog(t *testing.T) {
 	clock := clockwork.NewFakeClock()
 
 	var PST *time.Location
-	if timeParse, err := time.Parse("MST", "PST"); err == nil {
+	if timeParse, err := time.Parse("-07:00", "-08:00"); err == nil {
 		PST = timeParse.Location()
 	} else {
 		t.Errorf("Could not set up timezone: %s", err.Error())

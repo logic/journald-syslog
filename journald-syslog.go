@@ -70,9 +70,9 @@ func (msg *SyslogMessage) Parse(buf string, source string) {
 					// TIMESTAMP
 					if tsEnd := strings.IndexRune(rest, ' '); tsEnd >= 0 {
 						// Try a couple of RFC3339-compatible parsings.
-						ts, err := time.Parse(time.RFC3339Nano, rest[:tsEnd])
+						ts, err := time.ParseInLocation(time.RFC3339Nano, rest[:tsEnd], time.UTC)
 						if err != nil {
-							ts, err = time.Parse(time.RFC3339, rest[:tsEnd])
+							ts, err = time.ParseInLocation(time.RFC3339, rest[:tsEnd], time.UTC)
 						}
 						if err == nil {
 							msg.Timestamp = ts
